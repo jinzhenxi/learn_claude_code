@@ -13,12 +13,12 @@ except ImportError:
 
 from client import ClaudeClient
 from config import Config
-from tools import BashTool, ToolRegistry
+from tools import build_default_registry
 
 
 def main() -> None:
     config = Config.load()
-    registry = ToolRegistry().register(BashTool())
+    registry = build_default_registry()
     client = ClaudeClient(
         base_url=config.base_url,
         api_key=config.api_key,
@@ -26,14 +26,14 @@ def main() -> None:
         registry=registry,
     )
 
-    print("s01: Agent Loop")
+    print("s02: Agent Loop with 5 tools")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s01 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s02 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):
