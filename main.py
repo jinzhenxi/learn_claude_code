@@ -15,12 +15,15 @@ from client import ClaudeClient
 from config import Config
 from hooks import build_default_hooks
 from permission import build_default_permission
+from todos import TodoManager
 from tools import build_default_registry
 
 
 def main() -> None:
     config = Config.load()
-    registry = build_default_registry()
+    # 单一状态实例：工具写入它，循环通过它拿提醒
+    todos = TodoManager()
+    registry = build_default_registry(todos)
     permission = build_default_permission()
     # s03 的权限管道作为众多回调之一挂进 hook 注册表
     hooks = build_default_hooks(permission)
@@ -30,16 +33,17 @@ def main() -> None:
         model_id=config.model_id,
         registry=registry,
         hooks=hooks,
+        todos=todos,
     )
 
-    print("s04: Agent Loop with Hooks")
+    print("s05: Agent Loop with Todo List")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s04 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s05 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):

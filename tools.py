@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from todos import TodoManager
+
 # 相对路径的锚点；是否允许越界由 permission 层裁决
 WORKDIR = Path.cwd().resolve()
 
@@ -197,6 +199,47 @@ class GlobTool(Tool):
         return f"glob {tool_input.get('pattern', '')}"
 
 
+class TodoWriteTool(Tool):
+    name = "todo_write"
+    description = (
+        "Create or replace the task todo list. Call before multi-step work "
+        "and update status as you progress; the whole list is replaced."
+    )
+
+    def __init__(self, manager: TodoManager) -> None:
+        # 不持有状态本身，只代理给共享的 TodoManager
+        self.manager = manager
+
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "todos": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string"},
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "completed"],
+                            },
+                        },
+                        "required": ["content"],
+                    },
+                }
+            },
+            "required": ["todos"],
+        }
+
+    def execute(self, todos: Any) -> str:
+        return self.manager.update(todos)
+
+    def preview(self, tool_input: dict[str, Any]) -> str:
+        return f"todo_write ({len(tool_input.get('todos', []))} items)"
+
+
 class ToolRegistry:
     """按名字注册/查找工具，执行分发完全替代 if-else。"""
 
@@ -219,8 +262,8 @@ class ToolRegistry:
         return [tool.definition() for tool in self._tools.values()]
 
 
-def build_default_registry() -> ToolRegistry:
-    """内置工具清单；新增工具后在这里加一行即完成注册。"""
+def build_default_registry(manager: TodoManager) -> ToolRegistry:
+    """内置工具清单；新增工具在这里加一行即完成注册。"""
     registry = ToolRegistry()
     for tool in (
         BashTool(),
@@ -228,6 +271,7 @@ def build_default_registry() -> ToolRegistry:
         WriteFileTool(),
         EditFileTool(),
         GlobTool(),
+        TodoWriteTool(manager),
     ):
         registry.register(tool)
     return registry

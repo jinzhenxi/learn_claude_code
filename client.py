@@ -16,6 +16,7 @@ class ClaudeClient:
         model_id: str,
         registry,
         hooks,
+        todos,
         max_tokens: int = 8000,
     ) -> None:
         # 显式传参，避免 ANTHROPIC_AUTH_TOKEN 等环境变量干扰
@@ -23,10 +24,13 @@ class ClaudeClient:
         self.model_id = model_id
         self.registry = registry
         self.hooks = hooks
+        self.todos = todos
         self.max_tokens = max_tokens
         self.system = (
             f"You are a coding agent at {os.getcwd()}. "
             "Use tools to solve tasks. Act, don't explain. "
+            "Before starting any multi-step task, use todo_write to plan your "
+            "steps, and update status as you go. "
             "Every tool call passes through hooks: if a tool returns an "
             "error, fix the arguments and retry; if a hook blocks the call, "
             "do not repeat the action, choose another approach."
@@ -56,6 +60,10 @@ class ClaudeClient:
                 return
 
             results = [self._invoke_tool(block) for block in tool_calls]
+            # 本轮结束：是否提醒由 TodoManager 按自己的闲置计数决定
+            reminder = self.todos.advance_round()
+            if reminder is not None:
+                results.append({"type": "text", "text": reminder})
             messages.append({"role": "user", "content": results})
 
     def _invoke_tool(self, block: Any) -> dict[str, Any]:
