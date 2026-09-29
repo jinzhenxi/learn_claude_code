@@ -2,19 +2,25 @@
 
 import subprocess
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# 所有文件类工具只能在该工作区内操作
+# 相对路径的锚点；是否允许越界由 permission 层裁决
 WORKDIR = Path.cwd().resolve()
 
 
-def safe_path(p: str) -> Path:
-    """相对路径解析到 WORKDIR，解析后逃逸出工作区则拒绝。"""
-    path = (WORKDIR / p).resolve()
-    if not path.is_relative_to(WORKDIR):
-        raise ValueError(f"Path escapes workspace: {p}")
-    return path
+def resolve_path(p: str) -> Path:
+    """相对路径锚定 WORKDIR 并规范化；边界裁决归权限层，工具不再自行拦截。"""
+    return (WORKDIR / p).resolve()
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    """一次工具调用的归一化结果：永不以异常形式出现。"""
+
+    content: str
+    is_error: bool = False
 
 
 class Tool(ABC):
@@ -29,7 +35,17 @@ class Tool(ABC):
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> str:
-        """执行工具，返回给模型的文本结果。"""
+        """成功路径：返回文本结果；失败直接 raise，无需自行 try/except。"""
+
+    def run(self, **kwargs: Any) -> ToolResult:
+        # 模板方法：唯一的异常收口点，保证任何工具都不会把异常抛给 client
+        try:
+            return ToolResult(content=self.execute(**kwargs))
+        except Exception as e:
+            return ToolResult(
+                content=f"Error: {type(e).__name__}: {e}",
+                is_error=True,
+            )
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -47,7 +63,6 @@ class BashTool(Tool):
     name = "bash"
     description = "Run a shell command."
 
-    DANGEROUS = ("rm -rf /", "sudo", "shutdown", "reboot", "> /dev/")
     TIMEOUT = 120
     MAX_OUTPUT = 50000
 
@@ -59,9 +74,6 @@ class BashTool(Tool):
         }
 
     def execute(self, command: str) -> str:
-        # 命中危险片段直接拦截，不进入子进程
-        if any(d in command for d in self.DANGEROUS):
-            return "Error: Dangerous command blocked"
         try:
             r = subprocess.run(
                 command,
@@ -72,12 +84,10 @@ class BashTool(Tool):
                 errors="replace",
                 timeout=self.TIMEOUT,
             )
-            out = (r.stdout + r.stderr).strip()
-            return out[: self.MAX_OUTPUT] if out else "(no output)"
         except subprocess.TimeoutExpired:
-            return f"Error: Timeout ({self.TIMEOUT}s)"
-        except (FileNotFoundError, OSError) as e:
-            return f"Error: {e}"
+            raise TimeoutError(f"Timeout ({self.TIMEOUT}s)") from None
+        out = (r.stdout + r.stderr).strip()
+        return out[: self.MAX_OUTPUT] if out else "(no output)"
 
     def preview(self, tool_input: dict[str, Any]) -> str:
         return f"$ {tool_input.get('command', '')}"
@@ -98,13 +108,10 @@ class ReadFileTool(Tool):
         }
 
     def execute(self, path: str, limit: int | None = None) -> str:
-        try:
-            lines = safe_path(path).read_text(encoding="utf-8").splitlines()
-            if limit and limit < len(lines):
-                lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {e}"
+        lines = resolve_path(path).read_text(encoding="utf-8").splitlines()
+        if limit and limit < len(lines):
+            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
+        return "\n".join(lines)
 
     def preview(self, tool_input: dict[str, Any]) -> str:
         return f"read {tool_input.get('path', '')}"
@@ -125,13 +132,10 @@ class WriteFileTool(Tool):
         }
 
     def execute(self, path: str, content: str) -> str:
-        try:
-            file_path = safe_path(path)
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
-            return f"Wrote {len(content)} bytes to {path}"
-        except Exception as e:
-            return f"Error: {e}"
+        file_path = resolve_path(path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+        return f"Wrote {len(content)} bytes to {path}"
 
     def preview(self, tool_input: dict[str, Any]) -> str:
         return f"write {tool_input.get('path', '')}"
@@ -153,15 +157,12 @@ class EditFileTool(Tool):
         }
 
     def execute(self, path: str, old_text: str, new_text: str) -> str:
-        try:
-            file_path = safe_path(path)
-            text = file_path.read_text(encoding="utf-8")
-            if old_text not in text:
-                return f"Error: text not found in {path}"
-            file_path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-            return f"Edited {path}"
-        except Exception as e:
-            return f"Error: {e}"
+        file_path = resolve_path(path)
+        text = file_path.read_text(encoding="utf-8")
+        if old_text not in text:
+            raise ValueError(f"text not found in {path}")
+        file_path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
+        return f"Edited {path}"
 
     def preview(self, tool_input: dict[str, Any]) -> str:
         return f"edit {tool_input.get('path', '')}"
@@ -181,19 +182,16 @@ class GlobTool(Tool):
         }
 
     def execute(self, pattern: str) -> str:
-        try:
-            # 去重并剔除经符号链接逃逸出工作区的路径
-            matches = sorted({
-                str(m.relative_to(WORKDIR))
-                for m in WORKDIR.glob(pattern)
-                if m.resolve().is_relative_to(WORKDIR)
-            })
-            shown = matches[: self.MAX_MATCHES]
-            if len(matches) > self.MAX_MATCHES:
-                shown.append("... (more matches omitted; narrow the pattern)")
-            return "\n".join(shown) if shown else "(no matches)"
-        except Exception as e:
-            return f"Error: {e}"
+        # 去重并剔除经符号链接逃逸出工作区的路径
+        matches = sorted({
+            str(m.relative_to(WORKDIR))
+            for m in WORKDIR.glob(pattern)
+            if m.resolve().is_relative_to(WORKDIR)
+        })
+        shown = matches[: self.MAX_MATCHES]
+        if len(matches) > self.MAX_MATCHES:
+            shown.append("... (more matches omitted; narrow the pattern)")
+        return "\n".join(shown) if shown else "(no matches)"
 
     def preview(self, tool_input: dict[str, Any]) -> str:
         return f"glob {tool_input.get('pattern', '')}"
