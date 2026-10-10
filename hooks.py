@@ -7,9 +7,8 @@
 
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from tools import WORKDIR
-
 if TYPE_CHECKING:
+    # 类型仅用于注解；运行时不导入 tools 以免 hooks <-> tools 循环依赖
     from permission import Permission
 
 
@@ -65,6 +64,9 @@ class PermissionHook:
 
 def context_inject_hook(query: str) -> Optional[str]:
     """UserPromptSubmit：用户输入送达模型前注入运行上下文提示。"""
+    # 延迟导入：模块加载期避开 hooks -> tools -> agent -> hooks 的环
+    from tools import WORKDIR
+
     print(f"\033[90m[HOOK] UserPromptSubmit: working in {WORKDIR}\033[0m")
     return None
 

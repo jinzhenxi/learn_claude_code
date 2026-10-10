@@ -1,4 +1,4 @@
-"""入口：组装配置、工具与客户端，启动交互式 REPL。"""
+"""入口：组装 LLM、注册表、hooks 与主 Agent，启动交互式 REPL。"""
 
 try:
     import readline
@@ -11,45 +11,46 @@ try:
 except ImportError:
     pass
 
+from agent import MainAgent
 from client import ClaudeClient
 from config import Config
-from hooks import build_default_hooks
+from hooks import HookEvent, build_default_hooks
 from permission import build_default_permission
 from todos import TodoManager
-from tools import build_default_registry
+from tools import build_tool_manager
 
 
 def main() -> None:
     config = Config.load()
-    # 单一状态实例：工具写入它，循环通过它拿提醒
-    todos = TodoManager()
-    registry = build_default_registry(todos)
-    permission = build_default_permission()
-    # s03 的权限管道作为众多回调之一挂进 hook 注册表
-    hooks = build_default_hooks(permission)
-    client = ClaudeClient(
+    llm = ClaudeClient(
         base_url=config.base_url,
         api_key=config.api_key,
         model_id=config.model_id,
-        registry=registry,
-        hooks=hooks,
-        todos=todos,
     )
 
-    print("s05: Agent Loop with Todo List")
+    todos = TodoManager()
+    permission = build_default_permission()
+    # s03 的权限管道作为众多回调之一挂进 hook 注册表；子 Agent 复用同一份
+    hooks = build_default_hooks(permission)
+    registry = build_tool_manager(todos, llm, hooks)
+    agent = MainAgent(llm, registry, hooks, todos)
+
+    print("s06: Agent Loop with Subagents")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s05 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s06 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):
             break
 
-        client.agent_loop(query, history)
+        hooks.trigger(HookEvent.USER_PROMPT_SUBMIT, query)
+        history.append({"role": "user", "content": query})
+        agent.run(history)
 
         # 打印模型本轮最终答复中的 text 块
         response_content = history[-1]["content"]
