@@ -16,6 +16,7 @@ from client import ClaudeClient
 from config import Config
 from hooks import HookEvent, build_default_hooks
 from permission import build_default_permission
+from skill_manager import SkillManager
 from todos import TodoManager
 from tools import build_tool_manager
 
@@ -32,17 +33,19 @@ def main() -> None:
     permission = build_default_permission()
     # s03 的权限管道作为众多回调之一挂进 hook 注册表；子 Agent 复用同一份
     hooks = build_default_hooks(permission)
-    registry = build_tool_manager(todos, llm, hooks)
-    agent = MainAgent(llm, registry, hooks, todos)
+    # 启动时扫描 skills/，注册表就绪后目录即可注入 system prompt
+    skills = SkillManager.scan()
+    registry = build_tool_manager(todos, llm, hooks, skills)
+    agent = MainAgent(llm, registry, hooks, todos, skills)
 
-    print("s06: Agent Loop with Subagents")
+    print("s07: Agent Loop with Skills")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s06 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s07 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):

@@ -10,14 +10,21 @@ class SubAgent(BaseAgent):
     # 安全上限：连续工具调用不超过该轮数，防止子任务失控
     MAX_ROUNDS = 30
 
+    def __init__(self, llm: Any, registry: Any, hooks: Any,
+                 skills: Any = None) -> None:
+        super().__init__(llm, registry, hooks)
+        self.skills = skills
+
     @property
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             f"You are a subagent at {os.getcwd()}, spawned to complete one "
             "delegated subtask. Work autonomously with the available tools; "
             "file changes persist in the shared workspace. When finished, "
             "reply with only the final conclusion to return to the parent."
         )
+        catalog = self.skills.catalog() if self.skills else ""
+        return f"{prompt}\n\n{catalog}" if catalog else prompt
 
     @property
     def max_rounds(self) -> int:

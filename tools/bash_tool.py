@@ -34,7 +34,11 @@ class BashTool(BaseTool):
         except subprocess.TimeoutExpired:
             raise TimeoutError(f"Timeout ({self.TIMEOUT}s)") from None
         out = (r.stdout + r.stderr).strip()
-        return out[: self.MAX_OUTPUT] if out else "(no output)"
+        shown = out[: self.MAX_OUTPUT] if out else "(no output)"
+        # 非零退出即失败：抛出后由基类收口为带 is_error 的 ToolResult
+        if r.returncode != 0:
+            raise RuntimeError(f"exit {r.returncode}: {shown}")
+        return shown
 
     def preview(self, tool_input) -> str:
         return f"$ {tool_input.get('command', '')}"

@@ -16,13 +16,15 @@ class MainAgent(BaseAgent):
         registry: Any,
         hooks: Any,
         todos: "TodoManager",
+        skills: Any = None,
     ) -> None:
         super().__init__(llm, registry, hooks)
         self.todos = todos
+        self.skills = skills
 
     @property
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             f"You are a coding agent at {os.getcwd()}. "
             "Use tools to solve tasks. Act, don't explain. "
             "Before starting any multi-step task, use todo_write to plan your "
@@ -33,6 +35,9 @@ class MainAgent(BaseAgent):
             "error, fix the arguments and retry; if a hook blocks the call, "
             "do not repeat the action, choose another approach."
         )
+        catalog = self.skills.catalog() if self.skills else ""
+        # 技能目录随 system 每轮可见，不需要额外 API 调用
+        return f"{prompt}\n\n{catalog}" if catalog else prompt
 
     def observe_round(self) -> list[dict[str, Any]]:
         # 闲置满 3 轮时由 TodoManager 决定追加提醒
