@@ -13,6 +13,7 @@ except ImportError:
 
 from agent import MainAgent
 from client import ClaudeClient
+from compaction import ContextCompactor
 from config import Config
 from hooks import HookEvent, build_default_hooks
 from permission import build_default_permission
@@ -35,17 +36,21 @@ def main() -> None:
     hooks = build_default_hooks(permission)
     # 启动时扫描 skills/，注册表就绪后目录即可注入 system prompt
     skills = SkillManager.scan()
-    registry = build_tool_manager(todos, llm, hooks, skills)
-    agent = MainAgent(llm, registry, hooks, todos, skills)
+    # 上下文压缩作为 PreLLMCall mutator 挂进注册表，循环零感知；顺序即加工顺序
+    compactor = ContextCompactor(llm)
+    hooks.register_mutator(HookEvent.PRE_LLM_CALL, compactor.prepare)
+    hooks.register_mutator(HookEvent.PRE_LLM_CALL, compactor.maybe_summarize)
+    registry = build_tool_manager(todos, llm, hooks, skills, compactor)
+    agent = MainAgent(llm, registry, hooks, todos, skills, compactor)
 
-    print("s07: Agent Loop with Skills")
+    print("s08: Agent Loop with Context Compaction")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s07 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s08 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):

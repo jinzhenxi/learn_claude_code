@@ -17,8 +17,9 @@ class MainAgent(BaseAgent):
         hooks: Any,
         todos: "TodoManager",
         skills: Any = None,
+        compactor: Any = None,
     ) -> None:
-        super().__init__(llm, registry, hooks)
+        super().__init__(llm, registry, hooks, compactor)
         self.todos = todos
         self.skills = skills
 

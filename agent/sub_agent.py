@@ -11,8 +11,8 @@ class SubAgent(BaseAgent):
     MAX_ROUNDS = 30
 
     def __init__(self, llm: Any, registry: Any, hooks: Any,
-                 skills: Any = None) -> None:
-        super().__init__(llm, registry, hooks)
+                 skills: Any = None, compactor: Any = None) -> None:
+        super().__init__(llm, registry, hooks, compactor)
         self.skills = skills
 
     @property

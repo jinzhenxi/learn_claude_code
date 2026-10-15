@@ -4,6 +4,63 @@
 - 先校验后替换：任何一项不合法都抛 ValueError，原状态保持不变。
 - 提醒策略内聚于此：连续 N 轮没有更新，advance_round() 返回提醒文本；
   循环不认识 todo_write，也不数轮次，只在每轮结束时问一次。
+
+运作流程
+========
+
+写入流程（模型调用 todo_write 工具触发）::
+
+    模型传入 raw（list 或 JSON 字符串）
+            |
+            v
+    +--------------------+
+    | TodoManager.update |
+    +---------+----------+
+              |
+              v
+    coerce_list(raw)  ── 非 list / 解析失败 ──> raise ValueError
+              |
+              v
+    len(todos) <= MAX_TODOS ?  ── 否 ──> raise ValueError
+              | 是
+              v
+    逐项解析 entry:
+      content = entry["content"].strip()
+      status  = entry["status"].lower()  (默认 pending)
+      TodoItem(content, status)  ── 空内容 / 非法状态 ──> raise ValueError(todos[i] ...)
+              |
+              v
+    in_progress 数量 <= 1 ?  ── 否 ──> raise ValueError
+              | 是
+              v
+    全部合法：
+      self._items = parsed        # 整体替换
+      self._idle_rounds = 0       # 刚更新，闲置归零
+      return self.render()        # 返回带标记的可读文本
+
+    注：任一环节抛错时 self._items 不被修改，原状态保持不变。
+
+轮次结束流程（主循环每轮末尾调用一次）::
+
+    advance_round()
+        |
+        v
+    self._idle_rounds += 1
+        |
+        v
+    _idle_rounds < REMINDER_INTERVAL ?
+        | 是                          | 否
+        v                             v
+    return None                 _idle_rounds = 0
+                                return REMINDER_TEXT
+                                （由主循环注入到下一轮提示中，
+                                 催促模型更新 todos）
+
+状态标记（render 输出）::
+
+    [ ]  pending        未开始
+    [>]  in_progress    进行中（同时最多一个）
+    [x]  completed      已完成
 """
 
 import ast

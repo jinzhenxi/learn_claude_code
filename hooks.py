@@ -1,8 +1,9 @@
 """Hook 层：生命周期事件注册表。
 
-循环只负责在固定时机 trigger 事件，不认识任何具体检查；
-要跑什么（权限、日志……）全部由注册表中的回调决定。
-返回非 None 的回调会阻断当前事件（PreToolUse 即不执行工具）。
+循环只负责在固定时机 trigger 事件，不认识任何具体检查；要跑什么全部由注册表决定。
+两条通道语义分离：
+  观察者/拦截器 trigger：返回非 None 字符串即阻断当前事件（PreToolUse 不执行工具）。
+  加工器     apply：payload 依次流过各 mutator 接力变换（如调用前压缩 messages）。
 """
 
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -14,28 +15,38 @@ if TYPE_CHECKING:
 
 class HookEvent:
     USER_PROMPT_SUBMIT = "UserPromptSubmit"
+    PRE_LLM_CALL = "PreLLMCall"
     PRE_TOOL_USE = "PreToolUse"
     POST_TOOL_USE = "PostToolUse"
     STOP = "Stop"
 
 
 HookCallback = Callable[..., Optional[str]]
+Mutator = Callable[[Any], Any]
 
 
 class HookRegistry:
-    """事件 -> 回调列表；分发逻辑替代在循环里写检查分支。"""
+    """事件 -> 回调列表；观察者走 trigger 短路阻断，加工器走 apply 接力变换。"""
 
     def __init__(self) -> None:
-        self._hooks: dict[str, list[HookCallback]] = {
-            HookEvent.USER_PROMPT_SUBMIT: [],
-            HookEvent.PRE_TOOL_USE: [],
-            HookEvent.POST_TOOL_USE: [],
-            HookEvent.STOP: [],
-        }
+        events = (
+            HookEvent.USER_PROMPT_SUBMIT,
+            HookEvent.PRE_LLM_CALL,
+            HookEvent.PRE_TOOL_USE,
+            HookEvent.POST_TOOL_USE,
+            HookEvent.STOP,
+        )
+        self._hooks: dict[str, list[HookCallback]] = {e: [] for e in events}
+        self._mutators: dict[str, list[Mutator]] = {e: [] for e in events}
 
     def register(self, event: str, callback: HookCallback) -> "HookRegistry":
         # 同事件按注册顺序执行
         self._hooks[event].append(callback)
+        return self
+
+    def register_mutator(self, event: str, mutator: Mutator) -> "HookRegistry":
+        """注册 payload -> payload 加工器；同事件按注册顺序接力。"""
+        self._mutators[event].append(mutator)
         return self
 
     def trigger(self, event: str, *args: Any) -> Optional[str]:
@@ -45,6 +56,12 @@ class HookRegistry:
             if result is not None:
                 return result
         return None
+
+    def apply(self, event: str, payload: Any) -> Any:
+        """让某事件的全部 mutator 依次加工 payload，返回最终结果。"""
+        for mutator in self._mutators[event]:
+            payload = mutator(payload)
+        return payload
 
 
 # -- s03 权限逻辑的适配：复用整套 Gate，不改写、只包装 --

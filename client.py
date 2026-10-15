@@ -1,10 +1,15 @@
 """客户端层：ClaudeClient 是对 Anthropic Messages API 的薄封装。
 
 不管循环、不认识工具，只负责一次模型调用；主 Agent 与子 Agent 共用它，
-所以两边的模型、鉴权和端点天然一致。
+所以两边的模型、鉴权和端点天然一致。413/prompt 过长归一化为
+PromptTooLongError，交给上层的应急压缩处理。
 """
 
-from anthropic import Anthropic
+from anthropic import Anthropic, APIStatusError
+
+
+class PromptTooLongError(Exception):
+    """上下文超过模型窗口（413 / prompt_too_long）。"""
 
 
 class ClaudeClient:
@@ -21,10 +26,15 @@ class ClaudeClient:
         self.max_tokens = max_tokens
 
     def create(self, system: str, messages: list, tools: list) -> object:
-        return self.client.messages.create(
-            model=self.model_id,
-            system=system,
-            messages=messages,
-            tools=tools,
-            max_tokens=self.max_tokens,
-        )
+        try:
+            return self.client.messages.create(
+                model=self.model_id,
+                system=system,
+                messages=messages,
+                tools=tools,
+                max_tokens=self.max_tokens,
+            )
+        except APIStatusError as e:
+            if e.status_code == 413 or "prompt is too long" in str(e).lower():
+                raise PromptTooLongError(str(e)) from e
+            raise

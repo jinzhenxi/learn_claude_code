@@ -11,10 +11,15 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ToolResult:
-    """一次工具调用的归一化结果：永不以异常形式出现。"""
+    """一次工具调用的归一化结果：永不以异常形式出现。
+
+    directive 可选，用于循环控制类工具（如 compact）向 Agent 下发指令；
+    普通工具恒为 None。
+    """
 
     content: str
     is_error: bool = False
+    directive: Any = None
 
 
 class BaseTool(ABC):
@@ -28,12 +33,15 @@ class BaseTool(ABC):
         """工具入参的 JSON Schema。"""
 
     @abstractmethod
-    def execute(self, **kwargs: Any) -> str:
-        """成功路径返回文本；失败直接 raise，无需自行 try/except。"""
+    def execute(self, **kwargs: Any) -> Any:
+        """成功路径返回文本；循环控制类工具可返回 ToolResult。失败直接 raise。"""
 
     def run(self, **kwargs: Any) -> ToolResult:
         try:
-            return ToolResult(content=self.execute(**kwargs))
+            output = self.execute(**kwargs)
+            if isinstance(output, ToolResult):
+                return output
+            return ToolResult(content=str(output))
         except Exception as e:
             return ToolResult(
                 content=f"Error: {type(e).__name__}: {e}",

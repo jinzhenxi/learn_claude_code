@@ -3,6 +3,7 @@
 from typing import Any
 
 from .bash_tool import BashTool
+from .compact_tool import CompactTool
 from .edit_file_tool import EditFileTool
 from .glob_tool import GlobTool
 from .load_skill_tool import LoadSkillTool
@@ -19,22 +20,24 @@ def _base_tools():
 
 
 def build_tool_manager(
-    todos: Any, llm: Any, hooks: Any, skills: Any
+    todos: Any, llm: Any, hooks: Any, skills: Any, compactor: Any
 ) -> ToolManager:
     base_tools = _base_tools()
 
-    # 子管理器：基础五工具 + 只读技能加载；禁止递归、不共享待办
+    # 子管理器：基础五工具 + 只读技能加载 + 压缩；禁止递归、不共享待办
     sub_manager = ToolManager()
     for tool in base_tools:
         sub_manager.register(tool)
     sub_manager.register(LoadSkillTool(skills))
+    sub_manager.register(CompactTool(compactor))
 
     # 主管理器：在子能力之上挂 todo_write 与 task
     main_manager = ToolManager()
     for tool in base_tools:
         main_manager.register(tool)
     main_manager.register(LoadSkillTool(skills))
+    main_manager.register(CompactTool(compactor))
     main_manager.register(TodoWriteTool(todos))
     # TaskTool 最后注册：它依赖子管理器，但子管理器永不包含它
-    main_manager.register(TaskTool(llm, hooks, sub_manager, skills))
+    main_manager.register(TaskTool(llm, hooks, sub_manager, skills, compactor))
     return main_manager
