@@ -16,6 +16,7 @@ from client import ClaudeClient
 from compaction import ContextCompactor
 from config import Config
 from hooks import HookEvent, build_default_hooks
+from memory import MemoryManager, extract_and_save, inject_relevant
 from permission import build_default_permission
 from skill_manager import SkillManager
 from todos import TodoManager
@@ -40,24 +41,39 @@ def main() -> None:
     compactor = ContextCompactor(llm)
     hooks.register_mutator(HookEvent.PRE_LLM_CALL, compactor.prepare)
     hooks.register_mutator(HookEvent.PRE_LLM_CALL, compactor.maybe_summarize)
+    # task09：持久记忆
+    memory = MemoryManager()
+    # 路径二：用户请求开始时 side-query 选相关记忆注入当前 user turn
+    hooks.register_mutator(
+        HookEvent.USER_PROMPT_SUBMIT,
+        lambda msg: inject_relevant(llm, msg, memory),
+    )
+    # 写入：每轮结束（STOP）后提取稳定偏好/事实，持久化为记忆
+    hooks.register(
+        HookEvent.STOP,
+        lambda messages: (extract_and_save(llm, messages, memory), None)[1],
+    )
     registry = build_tool_manager(todos, llm, hooks, skills, compactor)
-    agent = MainAgent(llm, registry, hooks, todos, skills, compactor)
+    agent = MainAgent(llm, registry, hooks, todos, skills, compactor, memory)
 
-    print("s08: Agent Loop with Context Compaction")
+    print("s09: Agent Loop with Long-term Memory")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s08 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s09 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):
             break
 
-        hooks.trigger(HookEvent.USER_PROMPT_SUBMIT, query)
-        history.append({"role": "user", "content": query})
+        user_msg = {"role": "user", "content": query}
+        # observer 日志 + mutator 注入相关记忆
+        hooks.trigger(HookEvent.USER_PROMPT_SUBMIT, user_msg)
+        user_msg = hooks.apply(HookEvent.USER_PROMPT_SUBMIT, user_msg)
+        history.append(user_msg)
         agent.run(history)
 
         # 打印模型本轮最终答复中的 text 块

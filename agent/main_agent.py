@@ -7,6 +7,7 @@ from .base_agent import BaseAgent
 
 if TYPE_CHECKING:
     from todos import TodoManager
+    from memory import MemoryManager
 
 
 class MainAgent(BaseAgent):
@@ -18,10 +19,12 @@ class MainAgent(BaseAgent):
         todos: "TodoManager",
         skills: Any = None,
         compactor: Any = None,
+        memory: "MemoryManager | None" = None,
     ) -> None:
         super().__init__(llm, registry, hooks, compactor)
         self.todos = todos
         self.skills = skills
+        self.memory = memory
 
     @property
     def system_prompt(self) -> str:
@@ -37,8 +40,16 @@ class MainAgent(BaseAgent):
             "do not repeat the action, choose another approach."
         )
         catalog = self.skills.catalog() if self.skills else ""
-        # 技能目录随 system 每轮可见，不需要额外 API 调用
-        return f"{prompt}\n\n{catalog}" if catalog else prompt
+        parts = [prompt]
+        if catalog:
+            parts.append(catalog)
+        # task09：记忆索引常驻 SYSTEM（可被 prompt cache 缓存），正文按需注入 user turn
+        if self.memory is not None:
+            from memory import system_index_text
+            idx = system_index_text(self.memory)
+            if idx:
+                parts.append(idx)
+        return "\n\n".join(parts)
 
     def observe_round(self) -> list[dict[str, Any]]:
         # 闲置满 3 轮时由 TodoManager 决定追加提醒

@@ -79,11 +79,16 @@ class PermissionHook:
 
 # -- 其余为纯观测类回调，一律返回 None --
 
-def context_inject_hook(query: str) -> Optional[str]:
-    """UserPromptSubmit：用户输入送达模型前注入运行上下文提示。"""
+def context_inject_hook(user_msg: dict[str, Any]) -> Optional[str]:
+    """UserPromptSubmit：用户输入送达模型前注入运行上下文提示。
+
+    payload 是完整的 user message dict；observer 只观测不修改，
+    记忆注入等改写走 register_mutator。
+    """
     # 延迟导入：模块加载期避开 hooks -> tools -> agent -> hooks 的环
     from tools import WORKDIR
 
+    query = str(user_msg.get("content", ""))
     print(f"\033[90m[HOOK] UserPromptSubmit: working in {WORKDIR}\033[0m")
     return None
 
