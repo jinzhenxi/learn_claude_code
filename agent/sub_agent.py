@@ -1,9 +1,9 @@
 """子 Agent：受限工具、全新 messages、轮数上限，只回最终结论。"""
 
-import os
 from typing import Any
 
 from .base_agent import BaseAgent
+from prompt import PromptManager, build_context
 
 
 class SubAgent(BaseAgent):
@@ -14,17 +14,13 @@ class SubAgent(BaseAgent):
                  skills: Any = None, compactor: Any = None) -> None:
         super().__init__(llm, registry, hooks, compactor)
         self.skills = skills
+        # task10：system prompt 分段组装 + 缓存
+        self._prompt = PromptManager()
 
     @property
     def system_prompt(self) -> str:
-        prompt = (
-            f"You are a subagent at {os.getcwd()}, spawned to complete one "
-            "delegated subtask. Work autonomously with the available tools; "
-            "file changes persist in the shared workspace. When finished, "
-            "reply with only the final conclusion to return to the parent."
-        )
-        catalog = self.skills.catalog() if self.skills else ""
-        return f"{prompt}\n\n{catalog}" if catalog else prompt
+        context = build_context("sub", self.registry, self.skills, None)
+        return self._prompt.get_system_prompt(context)
 
     @property
     def max_rounds(self) -> int:

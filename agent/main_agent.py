@@ -1,9 +1,9 @@
 """主 Agent：完整工具集、不限轮数、持有 TodoManager。"""
 
-import os
 from typing import TYPE_CHECKING, Any
 
 from .base_agent import BaseAgent
+from prompt import PromptManager, build_context
 
 if TYPE_CHECKING:
     from todos import TodoManager
@@ -25,31 +25,13 @@ class MainAgent(BaseAgent):
         self.todos = todos
         self.skills = skills
         self.memory = memory
+        # task10：system prompt 分段组装 + 缓存，循环零感知
+        self._prompt = PromptManager()
 
     @property
     def system_prompt(self) -> str:
-        prompt = (
-            f"You are a coding agent at {os.getcwd()}. "
-            "Use tools to solve tasks. Act, don't explain. "
-            "Before starting any multi-step task, use todo_write to plan your "
-            "steps, and update status as you go. "
-            "Delegate self-contained subtasks to the task tool; it returns "
-            "only the subagent's final conclusion. "
-            "Every tool call passes through hooks: if a tool returns an "
-            "error, fix the arguments and retry; if a hook blocks the call, "
-            "do not repeat the action, choose another approach."
-        )
-        catalog = self.skills.catalog() if self.skills else ""
-        parts = [prompt]
-        if catalog:
-            parts.append(catalog)
-        # task09：记忆索引常驻 SYSTEM（可被 prompt cache 缓存），正文按需注入 user turn
-        if self.memory is not None:
-            from memory import system_index_text
-            idx = system_index_text(self.memory)
-            if idx:
-                parts.append(idx)
-        return "\n\n".join(parts)
+        context = build_context("main", self.registry, self.skills, self.memory)
+        return self._prompt.get_system_prompt(context)
 
     def observe_round(self) -> list[dict[str, Any]]:
         # 闲置满 3 轮时由 TodoManager 决定追加提醒
