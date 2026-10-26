@@ -11,8 +11,9 @@ class SubAgent(BaseAgent):
     MAX_ROUNDS = 30
 
     def __init__(self, llm: Any, registry: Any, hooks: Any,
-                 skills: Any = None, compactor: Any = None) -> None:
-        super().__init__(llm, registry, hooks, compactor)
+                 skills: Any = None, compactor: Any = None,
+                 fallback_model_id: str | None = None) -> None:
+        super().__init__(llm, registry, hooks, compactor, fallback_model_id)
         self.skills = skills
         # task10：system prompt 分段组装 + 缓存
         self._prompt = PromptManager()

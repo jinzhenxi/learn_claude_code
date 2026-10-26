@@ -20,7 +20,8 @@ def _base_tools():
 
 
 def build_tool_manager(
-    todos: Any, llm: Any, hooks: Any, skills: Any, compactor: Any
+    todos: Any, llm: Any, hooks: Any, skills: Any, compactor: Any,
+    fallback_model_id: str | None = None,
 ) -> ToolManager:
     base_tools = _base_tools()
 
@@ -39,5 +40,7 @@ def build_tool_manager(
     main_manager.register(CompactTool(compactor))
     main_manager.register(TodoWriteTool(todos))
     # TaskTool 最后注册：它依赖子管理器，但子管理器永不包含它
-    main_manager.register(TaskTool(llm, hooks, sub_manager, skills, compactor))
+    main_manager.register(
+        TaskTool(llm, hooks, sub_manager, skills, compactor, fallback_model_id)
+    )
     return main_manager

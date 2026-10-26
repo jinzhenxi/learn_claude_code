@@ -14,6 +14,7 @@ class Config:
     base_url: str
     api_key: str
     model_id: str
+    fallback_model_id: str | None = None
 
     @classmethod
     def load(cls, env_path: Path = ENV_PATH) -> "Config":
@@ -23,4 +24,6 @@ class Config:
             base_url=os.environ["ANTHROPIC_BASE_URL"],
             api_key=os.environ["ANTHROPIC_API_KEY"],
             model_id=os.environ["MODEL_ID"],
+            # 可选：连续 3 次 529 过载时切换的备用模型
+            fallback_model_id=os.environ.get("FALLBACK_MODEL_ID") or None,
         )

@@ -53,17 +53,22 @@ def main() -> None:
         HookEvent.STOP,
         lambda messages: (extract_and_save(llm, messages, memory), None)[1],
     )
-    registry = build_tool_manager(todos, llm, hooks, skills, compactor)
-    agent = MainAgent(llm, registry, hooks, todos, skills, compactor, memory)
+    registry = build_tool_manager(
+        todos, llm, hooks, skills, compactor, config.fallback_model_id
+    )
+    agent = MainAgent(
+        llm, registry, hooks, todos, skills, compactor, memory,
+        config.fallback_model_id,
+    )
 
-    print("s09: Agent Loop with Long-term Memory")
+    print("s11: Agent Loop with Error Recovery")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s09 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s11 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):

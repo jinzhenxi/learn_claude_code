@@ -20,8 +20,9 @@ class MainAgent(BaseAgent):
         skills: Any = None,
         compactor: Any = None,
         memory: "MemoryManager | None" = None,
+        fallback_model_id: str | None = None,
     ) -> None:
-        super().__init__(llm, registry, hooks, compactor)
+        super().__init__(llm, registry, hooks, compactor, fallback_model_id)
         self.todos = todos
         self.skills = skills
         self.memory = memory

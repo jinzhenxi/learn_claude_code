@@ -7,17 +7,20 @@ run() 的流程固定不变；主/子差异全部下沉为可覆写点：
   observe_round  每轮尾部追加的块，默认空（主 Agent 挂 todo 提醒）
 
 上下文如何加工由 PreLLMCall 上的 mutator（如压缩）决定，循环只触发切点；
-413 应急重试与工具控制指令属于控制流，仍由循环骨架负责。
+API 故障（截断 / 上下文超限 / 临时故障）统一交给 ErrorRecovery，
+循环只负责按它的决策 RETRY/ABORT 流转。
 """
 
 from abc import ABC, abstractmethod
 from typing import Any
 
-from client import PromptTooLongError
 from hooks import HookEvent
-
-# 413 应急压缩的连续失败熔断次数
-MAX_REACTIVE_RETRIES = 3
+from recovery import (
+    ErrorRecovery,
+    PromptTooLongError,
+    RecoveryAction,
+    TransientAPIError,
+)
 
 
 class BaseAgent(ABC):
@@ -27,11 +30,13 @@ class BaseAgent(ABC):
         registry: Any,
         hooks: Any,
         compactor: Any = None,
+        fallback_model_id: str | None = None,
     ) -> None:
         self.llm = llm
         self.registry = registry
         self.hooks = hooks
         self.compactor = compactor
+        self.fallback_model_id = fallback_model_id
 
     # -- 子类覆写点 --
 
@@ -57,29 +62,41 @@ class BaseAgent(ABC):
     def run(self, messages: list[dict[str, Any]]) -> None:
         """就地读写 messages；不再有工具调用时结束。"""
         rounds = 0
-        reactive_retries = 0
+        recovery = ErrorRecovery(self.compactor, self.fallback_model_id)
         while True:
             if self.max_rounds is not None and rounds >= self.max_rounds:
                 return
 
-            # task08，压缩策略：PRE_LLM_CALL 触发常规压缩（prepare + maybe_summarize），循环只透传 messages
+            # task08，压缩策略：PRE_LLM_CALL 触发常规压缩，循环只透传 messages
             messages[:] = self.hooks.apply(HookEvent.PRE_LLM_CALL, messages)
 
             try:
                 response = self.llm.create(
-                    self.system_prompt, messages, self.registry.definitions()
+                    self.system_prompt,
+                    messages,
+                    self.registry.definitions(),
+                    max_tokens=recovery.max_tokens,
+                    model_id=recovery.model_id,
                 )
             except PromptTooLongError:
-                # task08，压缩策略：413 应急兜底，reactive_compact 强裁，连续失败超阈值熔断
+                # task11：reactive compact 一次；仍超限则结束，再压不会更小
+                if recovery.handle_prompt_too_long(messages) is RecoveryAction.ABORT:
+                    return
+                continue
+            except TransientAPIError as e:
+                # task11：429/529 退避重试（内部 sleep，耗尽抛 MaxRetriesExceeded）
+                recovery.handle_transient(e)
+                continue
+            recovery.note_success()
+
+            # task11：输出截断——先升级 8K→64K 原请求重试，再续写至多 3 次
+            if response.stop_reason == "max_tokens":
                 if (
-                    self.compactor is not None
-                    and reactive_retries < MAX_REACTIVE_RETRIES
+                    recovery.handle_truncation(messages, response.content)
+                    is RecoveryAction.ABORT
                 ):
-                    reactive_retries += 1
-                    messages[:] = self.compactor.reactive_compact(messages)
-                    continue
-                raise
-            reactive_retries = 0
+                    return
+                continue
 
             messages.append({"role": "assistant", "content": response.content})
 
@@ -98,7 +115,7 @@ class BaseAgent(ABC):
                 results.append(result)
 
             if directive is not None:
-                # task08，压缩策略：模型主动调用 compact 工具，由 CompactDirective.apply 执行摘要替换
+                # task08：模型主动调用 compact 工具，由 CompactDirective 替换上下文
                 messages[:] = directive.apply(messages)
                 continue
 

@@ -1,8 +1,8 @@
 """ContextCompactor：统一编排三层预处理、LLM 摘要与应急压缩。
 
 prepare / maybe_summarize 是同签名的 PreLLMCall mutator（messages -> messages），
-按序挂到 hook 注册表；reactive_compact 仅供 Agent 在 413 时调用，
-连续失败熔断（MAX_REACTIVE_RETRIES）由 Agent 维护。
+按序挂到 hook 注册表；reactive_compact 仅供 recovery.ErrorRecovery 在 413 时
+调用，且只尝试一次，仍超限即放弃（再压不会更小）。
 """
 
 from typing import Any
