@@ -19,6 +19,7 @@ from hooks import HookEvent, build_default_hooks
 from memory import MemoryManager, extract_and_save, inject_relevant
 from permission import build_default_permission
 from skill_manager import SkillManager
+from task import TaskManager
 from todos import TodoManager
 from tools import build_tool_manager
 
@@ -53,22 +54,25 @@ def main() -> None:
         HookEvent.STOP,
         lambda messages: (extract_and_save(llm, messages, memory), None)[1],
     )
+    # task12：持久任务系统（.tasks/，blockedBy 依赖与认领状态机）
+    task_manager = TaskManager()
     registry = build_tool_manager(
-        todos, llm, hooks, skills, compactor, config.fallback_model_id
+        todos, llm, hooks, skills, compactor,
+        config.fallback_model_id, task_manager,
     )
     agent = MainAgent(
         llm, registry, hooks, todos, skills, compactor, memory,
         config.fallback_model_id,
     )
 
-    print("s11: Agent Loop with Error Recovery")
+    print("s12: Agent Loop with Task System")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s11 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s12 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):
