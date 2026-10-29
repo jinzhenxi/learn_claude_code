@@ -12,7 +12,7 @@ API 故障（截断 / 上下文超限 / 临时故障）统一交给 ErrorRecover
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hooks import HookEvent
 from recovery import (
@@ -21,6 +21,9 @@ from recovery import (
     RecoveryAction,
     TransientAPIError,
 )
+
+if TYPE_CHECKING:
+    from tools.base_tool import ToolResult
 
 
 class BaseAgent(ABC):
@@ -135,10 +138,24 @@ class BaseAgent(ABC):
         print(f"\033[33m{tool.preview(block.input)}\033[0m")
 
         # 安全策略由 hook 注册表决定；子 Agent 传入同一注册表，不跳过
-        deny_reason = self.hooks.trigger(HookEvent.PRE_TOOL_USE, block)
-        if deny_reason is not None:
-            print(f"\033[31m[blocked] {deny_reason}\033[0m")
-            return self._tool_result(block.id, deny_reason, True), None
+        pre_result = self.hooks.trigger(HookEvent.PRE_TOOL_USE, block)
+        if pre_result is not None:
+            # 延迟导入避免 agent <-> tools 循环依赖
+            from tools.base_tool import ToolResult
+
+            if isinstance(pre_result, ToolResult):
+                # Hook 直接提供结果（如后台任务占位）：跳过同步执行
+                color = "\033[31m" if pre_result.is_error else "\033[32m"
+                print(f"{color}{pre_result.content[:200]}\033[0m")
+                return (
+                    self._tool_result(
+                        block.id, pre_result.content, pre_result.is_error
+                    ),
+                    pre_result.directive,
+                )
+            # 字符串 = 阻断
+            print(f"\033[31m[blocked] {pre_result}\033[0m")
+            return self._tool_result(block.id, pre_result, True), None
 
         result = tool.run(**block.input)
         self.hooks.trigger(HookEvent.POST_TOOL_USE, block, result.content)

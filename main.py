@@ -12,6 +12,7 @@ except ImportError:
     pass
 
 from agent import MainAgent
+from background import BackgroundTaskManager
 from client import ClaudeClient
 from compaction import ContextCompactor
 from config import Config
@@ -60,19 +61,22 @@ def main() -> None:
         todos, llm, hooks, skills, compactor,
         config.fallback_model_id, task_manager,
     )
+    # task13：后台任务——耗时命令丢 daemon 线程，结果以通知回收，主循环零感知
+    bg_manager = BackgroundTaskManager(registry)
+    bg_manager.register_hooks(hooks)
     agent = MainAgent(
         llm, registry, hooks, todos, skills, compactor, memory,
         config.fallback_model_id,
     )
 
-    print("s12: Agent Loop with Task System")
+    print("s13: Background Tasks")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
     history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s12 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s13 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):

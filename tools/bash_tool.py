@@ -16,11 +16,20 @@ class BashTool(BaseTool):
     def input_schema(self):
         return {
             "type": "object",
-            "properties": {"command": {"type": "string"}},
+            "properties": {
+                "command": {"type": "string"},
+                "run_in_background": {
+                    "type": "boolean",
+                    "description": "Run the command in a background thread; "
+                                   "returns immediately with a task ID.",
+                },
+            },
             "required": ["command"],
         }
 
-    def execute(self, command: str) -> str:
+    def execute(self, command: str, run_in_background: bool = False) -> str:
+        # run_in_background 由后台管理器的 PRE_TOOL_USE hook 处理，
+        # 工具本身始终同步执行；该参数仅用于 schema 声明。
         try:
             r = subprocess.run(
                 command,
@@ -41,4 +50,5 @@ class BashTool(BaseTool):
         return shown
 
     def preview(self, tool_input) -> str:
-        return f"$ {tool_input.get('command', '')}"
+        prefix = "[bg] " if tool_input.get("run_in_background") else ""
+        return f"{prefix}$ {tool_input.get('command', '')}"

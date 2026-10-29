@@ -21,7 +21,7 @@ class HookEvent:
     STOP = "Stop"
 
 
-HookCallback = Callable[..., Optional[str]]
+HookCallback = Callable[..., Any]
 Mutator = Callable[[Any], Any]
 
 
@@ -49,10 +49,10 @@ class HookRegistry:
         self._mutators[event].append(mutator)
         return self
 
-    def trigger(self, event: str, *args: Any) -> Optional[str]:
+    def trigger(self, event: str, *args: Any) -> Any:
         for callback in self._hooks[event]:
             result = callback(*args)
-            # 首个非 None 结果即阻断，后续回调不再执行
+            # 首个非 None 结果即短路：字符串=阻断，ToolResult=直接采用
             if result is not None:
                 return result
         return None
