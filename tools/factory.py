@@ -22,6 +22,7 @@ def _base_tools():
 def build_tool_manager(
     todos: Any, llm: Any, hooks: Any, skills: Any, compactor: Any,
     fallback_model_id: str | None = None, task_manager: Any = None,
+    cron_scheduler: Any = None,
 ) -> ToolManager:
     # task12：持久任务系统（.tasks/）；主/子 Agent 共享，靠 owner + 锁防重复认领
     if task_manager is None:
@@ -30,15 +31,23 @@ def build_tool_manager(
     from task import build_task_tools
     task_tools = build_task_tools(task_manager)
 
+    # task14：cron 定时任务管理工具
+    cron_tools = []
+    if cron_scheduler is not None:
+        from cron import build_cron_tools
+        cron_tools = build_cron_tools(cron_scheduler)
+
     base_tools = _base_tools()
 
-    # 子管理器：基础五工具 + 只读技能加载 + 压缩 + 任务认领；禁止递归、不共享待办
+    # 子管理器：基础五工具 + 只读技能加载 + 压缩 + 任务认领 + cron 管理
     sub_manager = ToolManager()
     for tool in base_tools:
         sub_manager.register(tool)
     sub_manager.register(LoadSkillTool(skills))
     sub_manager.register(CompactTool(compactor))
     for tool in task_tools:
+        sub_manager.register(tool)
+    for tool in cron_tools:
         sub_manager.register(tool)
 
     # 主管理器：在子能力之上挂 todo_write 与 task（spawner）
@@ -48,6 +57,8 @@ def build_tool_manager(
     main_manager.register(LoadSkillTool(skills))
     main_manager.register(CompactTool(compactor))
     for tool in task_tools:
+        main_manager.register(tool)
+    for tool in cron_tools:
         main_manager.register(tool)
     main_manager.register(TodoWriteTool(todos))
     # TaskTool 最后注册：它依赖子管理器，但子管理器永不包含它

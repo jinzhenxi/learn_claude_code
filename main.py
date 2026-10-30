@@ -1,5 +1,7 @@
 """入口：组装 LLM、注册表、hooks 与主 Agent，启动交互式 REPL。"""
 
+import threading
+
 try:
     import readline
 
@@ -16,6 +18,7 @@ from background import BackgroundTaskManager
 from client import ClaudeClient
 from compaction import ContextCompactor
 from config import Config
+from cron import CronProcessor, CronScheduler
 from hooks import HookEvent, build_default_hooks
 from memory import MemoryManager, extract_and_save, inject_relevant
 from permission import build_default_permission
@@ -57,9 +60,12 @@ def main() -> None:
     )
     # task12：持久任务系统（.tasks/，blockedBy 依赖与认领状态机）
     task_manager = TaskManager()
+    # task14：cron 定时调度——独立线程轮询，到点入队，Agent 空闲时由 processor 拉起
+    cron_scheduler = CronScheduler()
+    cron_scheduler.start()
     registry = build_tool_manager(
         todos, llm, hooks, skills, compactor,
-        config.fallback_model_id, task_manager,
+        config.fallback_model_id, task_manager, cron_scheduler,
     )
     # task13：后台任务——耗时命令丢 daemon 线程，结果以通知回收，主循环零感知
     bg_manager = BackgroundTaskManager(registry)
@@ -69,14 +75,20 @@ def main() -> None:
         config.fallback_model_id,
     )
 
-    print("s13: Background Tasks")
+    # agent_lock：REPL 与 cron processor 互斥，同一时刻只有一个 Agent turn
+    agent_lock = threading.Lock()
+    history: list[dict] = []
+    # cron 交付端：队列有任务且 Agent 空闲时拉起一轮执行
+    cron_processor = CronProcessor(cron_scheduler, agent, history, agent_lock)
+    cron_processor.start()
+
+    print("s14: Cron Scheduler")
     print("Enter a question, press Enter to send. Type q to quit.\n")
 
-    history = []
     while True:
         try:
             # \001/\002 告知 Readline 中间的 ANSI 转义显示宽度为 0
-            query = input("\001\033[36m\002s13 >> \001\033[0m\002")
+            query = input("\001\033[36m\002s14 >> \001\033[0m\002")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):
@@ -86,8 +98,10 @@ def main() -> None:
         # observer 日志 + mutator 注入相关记忆
         hooks.trigger(HookEvent.USER_PROMPT_SUBMIT, user_msg)
         user_msg = hooks.apply(HookEvent.USER_PROMPT_SUBMIT, user_msg)
-        history.append(user_msg)
-        agent.run(history)
+        # 与 cron processor 互斥：持锁期间 processor 无法插队
+        with agent_lock:
+            history.append(user_msg)
+            agent.run(history)
 
         # 打印模型本轮最终答复中的 text 块
         response_content = history[-1]["content"]
